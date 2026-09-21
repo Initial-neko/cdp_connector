@@ -7,9 +7,13 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.*;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.Executors;
 
 final class TestPageServer implements AutoCloseable {
+    private static final String SESSION_COOKIE =
+            "CDP_TEST_SESSION=logged-in";
+
     private final HttpServer server;
 
     TestPageServer(int port) throws IOException {
@@ -39,9 +43,7 @@ final class TestPageServer implements AutoCloseable {
         server.createContext("/api/echo", exchange -> {
             String requestBody =
                     read(exchange.getRequestBody());
-            String escaped = requestBody
-                    .replace("\\", "\\\\")
-                    .replace("\"", "\\\"");
+            String escaped = escapeJson(requestBody);
 
             byte[] body = (
                     "{\"ok\":true,\"requestBody\":\""
@@ -54,6 +56,75 @@ final class TestPageServer implements AutoCloseable {
                     200,
                     "application/json; charset=UTF-8",
                     body);
+        });
+
+        server.createContext("/api/authenticated", exchange -> {
+            if (!requireSession(exchange)) {
+                return;
+            }
+
+            send(
+                    exchange,
+                    200,
+                    "application/json; charset=UTF-8",
+                    "{\"ok\":true,\"authenticated\":true}"
+                            .getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/api/step1", exchange -> {
+            if (!requireSession(exchange)) {
+                return;
+            }
+
+            String requestBody = read(exchange.getRequestBody());
+            String body = "{\"ok\":true,"
+                    + "\"nextId\":\"A-100\","
+                    + "\"requestBody\":\""
+                    + escapeJson(requestBody)
+                    + "\"}";
+
+            send(
+                    exchange,
+                    200,
+                    "application/json; charset=UTF-8",
+                    body.getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/api/end", exchange -> {
+            if (!requireSession(exchange)) {
+                return;
+            }
+
+            String requestBody = read(exchange.getRequestBody());
+            String body = "{\"ok\":true,"
+                    + "\"ended\":true,"
+                    + "\"requestBody\":\""
+                    + escapeJson(requestBody)
+                    + "\"}";
+
+            send(
+                    exchange,
+                    200,
+                    "application/json; charset=UTF-8",
+                    body.getBytes(StandardCharsets.UTF_8));
+        });
+
+        server.createContext("/api/report-html", exchange -> {
+            if (!requireSession(exchange)) {
+                return;
+            }
+
+            String body =
+                    "<article id=\"analysis-html\">"
+                            + "<h2>analysis report</h2>"
+                            + "<p>generated-from-authenticated-api</p>"
+                            + "</article>";
+
+            send(
+                    exchange,
+                    200,
+                    "text/html; charset=UTF-8",
+                    body.getBytes(StandardCharsets.UTF_8));
         });
 
         server.createContext("/fragment", exchange -> {
@@ -102,6 +173,29 @@ final class TestPageServer implements AutoCloseable {
         server.start();
     }
 
+    private static boolean requireSession(
+            HttpExchange exchange) throws IOException {
+        List<String> cookies =
+                exchange.getRequestHeaders().get("Cookie");
+
+        if (cookies != null) {
+            for (String cookie : cookies) {
+                if (cookie != null
+                        && cookie.contains(SESSION_COOKIE)) {
+                    return true;
+                }
+            }
+        }
+
+        send(
+                exchange,
+                401,
+                "application/json; charset=UTF-8",
+                "{\"ok\":false,\"error\":\"not-authenticated\"}"
+                        .getBytes(StandardCharsets.UTF_8));
+        return false;
+    }
+
     private static void send(
             HttpExchange exchange,
             int status,
@@ -138,6 +232,17 @@ final class TestPageServer implements AutoCloseable {
         return new String(
                 out.toByteArray(),
                 StandardCharsets.UTF_8);
+    }
+
+    private static String escapeJson(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n");
     }
 
     @Override
@@ -189,6 +294,11 @@ final class TestPageServer implements AutoCloseable {
             } finally {
                 in.close();
             }
+
+            exchange.getResponseHeaders().add(
+                    "Set-Cookie",
+                    SESSION_COOKIE
+                            + "; Path=/; HttpOnly; SameSite=Lax");
 
             send(
                     exchange,
