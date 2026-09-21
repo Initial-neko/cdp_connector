@@ -183,7 +183,7 @@ export CDP_IT=1
 mvn test
 ```
 
-`CdpConnectorIT` 会验证连接 Chrome、页面 JS、页面操纵、GET/POST/HTML/500 请求、request/response body、HTML snapshot 和 HAR。
+`CdpConnectorTest` 会验证连接 Chrome、页面 JS、页面操纵、GET/POST/HTML/500 请求、request/response body、HTML snapshot 和 HAR。
 
 也可以在 IDEA 直接运行 `ManualAcceptanceMain`。
 
