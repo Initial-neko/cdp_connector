@@ -7,6 +7,7 @@
     body { font-family: Arial, sans-serif; max-width: 900px; margin: 24px auto; line-height: 1.5; }
     button, input { margin: 6px 4px; padding: 8px 12px; }
     pre { background: #f5f5f5; padding: 12px; white-space: pre-wrap; word-break: break-all; }
+    .group { margin: 14px 0; padding: 10px; border: 1px solid #ddd; }
   </style>
 </head>
 <body>
@@ -17,7 +18,8 @@
   <input id="name" value="initial">
 </label>
 
-<div>
+<div class="group">
+  <strong>Browser button requests</strong><br>
   <button id="get-json">GET JSON</button>
   <button id="post-json">POST JSON</button>
   <button id="load-html">GET HTML</button>
@@ -25,9 +27,16 @@
   <button id="failed">HTTP 500</button>
 </div>
 
+<div class="group">
+  <strong>Login-state workflow</strong><br>
+  <button id="auth-api">AUTH API</button>
+  <button id="api-chain">RUN API CHAIN</button>
+</div>
+
 <h3>Last result</h3>
 <pre id="last-result">idle</pre>
 <div id="fragment-host"></div>
+<div id="analysis-host"></div>
 
 <script>
   const out = document.querySelector('#last-result');
@@ -62,6 +71,41 @@
   document.querySelector('#failed').onclick = async () => {
     const r = await fetch('/api/error');
     out.textContent = 'error-status:' + r.status;
+  };
+
+  document.querySelector('#auth-api').onclick = async () => {
+    const r = await fetch('/api/authenticated', {credentials: 'include'});
+    out.textContent = 'auth:' + r.status + ':' + await r.text();
+  };
+
+  document.querySelector('#api-chain').onclick = async () => {
+    const step1 = await fetch('/api/step1', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query: nameInput.value})
+    });
+    const step1Json = await step1.json();
+
+    const end = await fetch('/api/end', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id: step1Json.nextId})
+    });
+    const endJson = await end.json();
+
+    const html = await fetch(
+      '/api/report-html?id=' + encodeURIComponent(step1Json.nextId),
+      {credentials: 'include'}
+    ).then(r => r.text());
+
+    document.querySelector('#analysis-host').innerHTML = html;
+    out.textContent = JSON.stringify({
+      step1: step1Json,
+      end: endJson,
+      htmlLoaded: true
+    });
   };
 </script>
 </body>
