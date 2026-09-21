@@ -3,6 +3,10 @@ package com.initialneko.cdp;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 
 public final class PageController {
@@ -55,6 +59,20 @@ public final class PageController {
         return value == null ? null : String.valueOf(value);
     }
 
+    public void saveHtml(Path path) {
+        try {
+            String current = html();
+            Files.write(
+                    path,
+                    (current == null ? "" : current)
+                            .getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new CdpException(
+                    "Failed to write page HTML: " + path,
+                    e);
+        }
+    }
+
     public String text(String cssSelector) {
         String selector = JSON.toJSONString(cssSelector);
         Object value = eval(
@@ -103,6 +121,55 @@ public final class PageController {
 
     public void reload() {
         connection.sendAndWait("Page.reload", new JSONObject());
+    }
+
+    public PageResponse get(String url) {
+        return request(PageRequest.get(url));
+    }
+
+    public PageResponse postJson(String url, String json) {
+        return request(PageRequest.postJson(url, json));
+    }
+
+    public PageResponse request(PageRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("request cannot be null");
+        }
+
+        String config = request.toJson().toJSONString();
+        String javascript =
+                "(async function(){"
+                        + "var c=" + config + ";"
+                        + "var o={method:c.method||'GET',"
+                        + "headers:c.headers||{},"
+                        + "credentials:c.credentials||'include',"
+                        + "redirect:c.redirect||'follow'};"
+                        + "if(c.body!==null&&c.body!==undefined"
+                        + "&&o.method!=='GET'&&o.method!=='HEAD'){o.body=c.body;}"
+                        + "var r=await fetch(c.url,o);"
+                        + "var h={};"
+                        + "r.headers.forEach(function(v,k){h[k]=v;});"
+                        + "var b=await r.text();"
+                        + "return {status:r.status,statusText:r.statusText,"
+                        + "url:r.url,redirected:r.redirected,headers:h,body:b};"
+                        + "})()";
+
+        return PageResponse.fromJson(evalObject(javascript));
+    }
+
+    public PageResponse replay(CapturedExchange exchange) {
+        return request(
+                PageRequest.replay(exchange)
+                        .build());
+    }
+
+    public PageResponse replay(
+            CapturedExchange exchange,
+            String replacementBody) {
+        return request(
+                PageRequest.replay(exchange)
+                        .body(replacementBody)
+                        .build());
     }
 
     public void waitForJs(String javascriptCondition, long timeoutMillis) {
