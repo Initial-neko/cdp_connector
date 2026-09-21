@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSONObject;
 import org.junit.Assume;
 import org.junit.Test;
 
+import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
 
@@ -45,6 +46,14 @@ public class CdpConnectorTest {
                                 "({ok:true, answer:42})");
                 assertNotNull(objectResult);
 
+                String visibleCookies =
+                        String.valueOf(
+                                cdp.page().eval(
+                                        "document.cookie"));
+                assertFalse(
+                        visibleCookies.contains(
+                                "CDP_TEST_SESSION"));
+
                 CaptureSession capture =
                         cdp.network().start();
 
@@ -70,6 +79,69 @@ public class CdpConnectorTest {
                         "#server-fragment",
                         5000L);
 
+                PageResponse authenticated =
+                        cdp.page().get(
+                                "/api/authenticated");
+                assertEquals(
+                        200,
+                        authenticated.getStatus());
+                assertEquals(
+                        Boolean.TRUE,
+                        authenticated.json()
+                                .getBoolean(
+                                        "authenticated"));
+
+                PageResponse step1 =
+                        cdp.page().postJson(
+                                "/api/step1",
+                                "{\"query\":\"from-page-request\"}");
+                assertEquals(200, step1.getStatus());
+                assertEquals(
+                        "A-100",
+                        step1.json()
+                                .getString("nextId"));
+
+                PageResponse end =
+                        cdp.page().postJson(
+                                "/api/end",
+                                "{\"id\":\"A-100\"}");
+                assertEquals(200, end.getStatus());
+                assertEquals(
+                        Boolean.TRUE,
+                        end.json().getBoolean("ended"));
+
+                PageResponse report =
+                        cdp.page().get(
+                                "/api/report-html?id=A-100");
+                assertEquals(200, report.getStatus());
+                assertTrue(report.isHtml());
+                assertTrue(
+                        report.getBody()
+                                .contains("analysis report"));
+
+                cdp.page().eval(
+                        "document.querySelector('#analysis-host').innerHTML="
+                                + JSON.toJSONString(
+                                        report.getBody()));
+                assertTrue(
+                        cdp.page().html()
+                                .contains("analysis-html"));
+
+                CapturedExchange originalStep1 =
+                        waitForExchange(
+                                capture,
+                                "/api/step1",
+                                5000L);
+
+                PageResponse replayed =
+                        cdp.page().replay(
+                                originalStep1,
+                                "{\"query\":\"replayed\"}");
+                assertEquals(200, replayed.getStatus());
+                assertTrue(
+                        replayed.getBody()
+                                .contains("replayed"));
+
                 cdp.page().click("#slow");
                 cdp.page().waitForJs(
                         "document.querySelector('#last-result').textContent.indexOf('slow') >= 0",
@@ -80,18 +152,29 @@ public class CdpConnectorTest {
                         "document.querySelector('#last-result').textContent.indexOf('error-status:500') >= 0",
                         5000L);
 
+                Files.createDirectories(
+                        Paths.get("target"));
+                cdp.page().saveHtml(
+                        Paths.get(
+                                "target",
+                                "cdp-page.html"));
+                report.writeBody(
+                        Paths.get(
+                                "target",
+                                "cdp-report.html"));
+
                 capture.stop(5000L);
 
                 List<CapturedExchange> exchanges =
                         capture.getExchanges();
 
-                assertTrue(exchanges.size() >= 5);
+                assertTrue(exchanges.size() >= 10);
                 assertNotNull(capture.getStartHtml());
                 assertNotNull(capture.getEndHtml());
                 assertTrue(
                         capture.getEndHtml()
                                 .contains(
-                                        "server-fragment"));
+                                        "analysis-html"));
 
                 CapturedExchange post =
                         find(exchanges, "/api/echo");
@@ -113,6 +196,26 @@ public class CdpConnectorTest {
                         fragment.getResponseBody()
                                 .contains(
                                         "fragment-loaded"));
+
+                CapturedExchange authenticatedExchange =
+                        find(
+                                exchanges,
+                                "/api/authenticated");
+                assertNotNull(authenticatedExchange);
+                assertEquals(
+                        200,
+                        authenticatedExchange.getStatus());
+
+                CapturedExchange reportExchange =
+                        find(
+                                exchanges,
+                                "/api/report-html");
+                assertNotNull(reportExchange);
+                assertTrue(
+                        reportExchange
+                                .getResponseBody()
+                                .contains(
+                                        "analysis report"));
 
                 CapturedExchange error =
                         find(exchanges, "/api/error");
@@ -138,7 +241,7 @@ public class CdpConnectorTest {
                 assertTrue(
                         har.getJSONObject("log")
                                 .getJSONArray("entries")
-                                .size() >= 5);
+                                .size() >= 10);
 
                 capture.writeHar(
                         Paths.get(
@@ -150,6 +253,35 @@ public class CdpConnectorTest {
                                 capture.toHarJson()));
             }
         }
+    }
+
+    private static CapturedExchange waitForExchange(
+            CaptureSession capture,
+            String urlPart,
+            long timeoutMillis)
+            throws InterruptedException {
+        long deadline =
+                System.currentTimeMillis()
+                        + timeoutMillis;
+
+        while (System.currentTimeMillis()
+                < deadline) {
+            CapturedExchange exchange =
+                    find(
+                            capture.getExchanges(),
+                            urlPart);
+            if (exchange != null
+                    && exchange.getResponseBody()
+                    != null) {
+                return exchange;
+            }
+            Thread.sleep(25L);
+        }
+
+        fail(
+                "Timed out waiting for captured exchange: "
+                        + urlPart);
+        return null;
     }
 
     private static CapturedExchange findExact(
