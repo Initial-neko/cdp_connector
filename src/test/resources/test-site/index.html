@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>CDP Connector Test Page</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 24px auto; line-height: 1.5; }
+    button, input { margin: 6px 4px; padding: 8px 12px; }
+    pre { background: #f5f5f5; padding: 12px; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+<h1 id="title">CDP Connector Test Page</h1>
+
+<label>
+  Name:
+  <input id="name" value="initial">
+</label>
+
+<div>
+  <button id="get-json">GET JSON</button>
+  <button id="post-json">POST JSON</button>
+  <button id="load-html">GET HTML</button>
+  <button id="slow">SLOW REQUEST</button>
+  <button id="failed">HTTP 500</button>
+</div>
+
+<h3>Last result</h3>
+<pre id="last-result">idle</pre>
+<div id="fragment-host"></div>
+
+<script>
+  const out = document.querySelector('#last-result');
+  const nameInput = document.querySelector('#name');
+
+  document.querySelector('#get-json').onclick = async () => {
+    const r = await fetch('/api/json?name=' + encodeURIComponent(nameInput.value));
+    out.textContent = JSON.stringify(await r.json());
+  };
+
+  document.querySelector('#post-json').onclick = async () => {
+    const r = await fetch('/api/echo', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: nameInput.value, source: 'test-page'})
+    });
+    out.textContent = JSON.stringify(await r.json());
+  };
+
+  document.querySelector('#load-html').onclick = async () => {
+    const r = await fetch('/fragment');
+    const html = await r.text();
+    document.querySelector('#fragment-host').innerHTML = html;
+    out.textContent = html;
+  };
+
+  document.querySelector('#slow').onclick = async () => {
+    const r = await fetch('/api/slow');
+    out.textContent = JSON.stringify(await r.json());
+  };
+
+  document.querySelector('#failed').onclick = async () => {
+    const r = await fetch('/api/error');
+    out.textContent = 'error-status:' + r.status;
+  };
+</script>
+</body>
+</html>
